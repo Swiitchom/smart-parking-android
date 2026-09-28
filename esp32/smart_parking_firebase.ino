@@ -445,10 +445,18 @@ void checkP1() {
   Serial.println(uid);
 
   if (uid == BUS1_UID) {
-    p1State = AUTHORIZED_WAIT;
-    p1EntryTimer = millis();
     p1WrongSawCar = false;
-    setEvent("P1 Bus 1 Accepted", "entry", "P1");
+
+    if (stableIR1) {
+      // السيارة موجودة بالفعل: البطاقة الصحيحة توقف الإنذار فوراً
+      p1State = OCCUPIED;
+      setEvent("P1 Bus 1 Authorized", "entry", "P1");
+    } else {
+      // البطاقة قبل دخول السيارة: نعطيها 15 ثانية للدخول
+      p1State = AUTHORIZED_WAIT;
+      p1EntryTimer = millis();
+      setEvent("P1 Bus 1 Accepted", "entry", "P1");
+    }
   } else {
     p1State = WRONG_ALERT;
     p1WrongSawCar = false;
@@ -476,10 +484,18 @@ void checkP2() {
   Serial.println(uid);
 
   if (uid == BUS2_UID) {
-    p2State = AUTHORIZED_WAIT;
-    p2EntryTimer = millis();
     p2WrongSawCar = false;
-    setEvent("P2 Bus 2 Accepted", "entry", "P2");
+
+    if (stableIR2) {
+      // السيارة موجودة بالفعل: البطاقة الصحيحة توقف الإنذار فوراً
+      p2State = OCCUPIED;
+      setEvent("P2 Bus 2 Authorized", "entry", "P2");
+    } else {
+      // البطاقة قبل دخول السيارة: نعطيها 15 ثانية للدخول
+      p2State = AUTHORIZED_WAIT;
+      p2EntryTimer = millis();
+      setEvent("P2 Bus 2 Accepted", "entry", "P2");
+    }
   } else {
     p2State = WRONG_ALERT;
     p2WrongSawCar = false;
@@ -519,11 +535,18 @@ void checkP3() {
   Serial.println(uid);
 
   if (booked && bookedUid.length() > 0 && uid == bookedUid) {
-    p3State = AUTHORIZED_WAIT;
-    p3EntryTimer = millis();
     p3WrongSawCar = false;
 
-    setEvent("P3 Booking Accepted", "entry", "P3");
+    if (stableIR3) {
+      // المركبة موجودة بالفعل: بطاقة الحجز الصحيحة توقف الإنذار فوراً
+      p3State = OCCUPIED;
+      setEvent("P3 Booking Authorized", "entry", "P3");
+    } else {
+      // البطاقة قبل دخول المركبة
+      p3State = AUTHORIZED_WAIT;
+      p3EntryTimer = millis();
+      setEvent("P3 Booking Accepted", "entry", "P3");
+    }
 
     Serial.print("NAME: ");
     Serial.println(bookedName);
@@ -548,6 +571,33 @@ void checkP3() {
 void updateParkingLogic() {
   unsigned long now = millis();
 
+  // ===================================================
+  // أي مركبة تصل إلى IR بدون تصريح مسبق تبدأ إنذاراً فوراً
+  // ===================================================
+  if (p1State == FREE && stableIR1) {
+    p1State = WRONG_ALERT;
+    p1WrongSawCar = true;
+    p1WrongStart = now;
+    setEvent("P1 Vehicle Without Card", "alert", "P1");
+  }
+
+  if (p2State == FREE && stableIR2) {
+    p2State = WRONG_ALERT;
+    p2WrongSawCar = true;
+    p2WrongStart = now;
+    setEvent("P2 Vehicle Without Card", "alert", "P2");
+  }
+
+  if (p3State == FREE && stableIR3) {
+    p3State = WRONG_ALERT;
+    p3WrongSawCar = true;
+    p3WrongStart = now;
+    setEvent("P3 Vehicle Without Authorization", "alert", "P3");
+  }
+
+  // ===================================================
+  // P1
+  // ===================================================
   if (p1State == AUTHORIZED_WAIT) {
     if (stableIR1) {
       p1State = OCCUPIED;
@@ -564,15 +614,21 @@ void updateParkingLogic() {
   } else if (p1State == WRONG_ALERT) {
     if (stableIR1) p1WrongSawCar = true;
 
+    // لا يتوقف الإنذار ما دامت المركبة أمام الحساس.
+    // البطاقة الصحيحة تغيّر الحالة إلى OCCUPIED داخل checkP1().
     if (p1WrongSawCar && !stableIR1) {
       p1State = FREE;
       p1WrongSawCar = false;
-      setEvent("P1 Wrong Vehicle Left", "exit", "P1");
+      setEvent("P1 Unauthorized Vehicle Left", "exit", "P1");
     } else if (!p1WrongSawCar && now - p1WrongStart >= WRONG_TIMEOUT) {
+      // بطاقة خاطئة بدون وجود مركبة: إنذار 5 ثوانٍ فقط
       p1State = FREE;
     }
   }
 
+  // ===================================================
+  // P2
+  // ===================================================
   if (p2State == AUTHORIZED_WAIT) {
     if (stableIR2) {
       p2State = OCCUPIED;
@@ -592,12 +648,15 @@ void updateParkingLogic() {
     if (p2WrongSawCar && !stableIR2) {
       p2State = FREE;
       p2WrongSawCar = false;
-      setEvent("P2 Wrong Vehicle Left", "exit", "P2");
+      setEvent("P2 Unauthorized Vehicle Left", "exit", "P2");
     } else if (!p2WrongSawCar && now - p2WrongStart >= WRONG_TIMEOUT) {
       p2State = FREE;
     }
   }
 
+  // ===================================================
+  // P3
+  // ===================================================
   if (p3State == AUTHORIZED_WAIT) {
     if (stableIR3) {
       p3State = OCCUPIED;
@@ -617,7 +676,7 @@ void updateParkingLogic() {
     if (p3WrongSawCar && !stableIR3) {
       p3State = FREE;
       p3WrongSawCar = false;
-      setEvent("P3 Wrong Vehicle Left", "exit", "P3");
+      setEvent("P3 Unauthorized Vehicle Left", "exit", "P3");
     } else if (!p3WrongSawCar && now - p3WrongStart >= WRONG_TIMEOUT) {
       p3State = FREE;
     }
@@ -635,42 +694,44 @@ void updateOutputs() {
 
   bool buzzer = false;
 
+  // ===================================================
+  // P1
+  // ===================================================
   if (p1State == WRONG_ALERT) {
     digitalWrite(GREEN_P1, LOW);
     digitalWrite(RED_P1, blinkState);
-    if (blinkState) buzzer = true;
-  } else if (stableIR1) {
-    digitalWrite(GREEN_P1, LOW);
-    digitalWrite(RED_P1, HIGH);
+    buzzer = true;
   } else {
+    // متاح أو مصرح له = أخضر
     digitalWrite(GREEN_P1, HIGH);
     digitalWrite(RED_P1, LOW);
   }
 
+  // ===================================================
+  // P2
+  // ===================================================
   if (p2State == WRONG_ALERT) {
     digitalWrite(GREEN_P2, LOW);
     digitalWrite(RED_P2, blinkState);
-    if (blinkState) buzzer = true;
-  } else if (stableIR2) {
-    digitalWrite(GREEN_P2, LOW);
-    digitalWrite(RED_P2, HIGH);
+    buzzer = true;
   } else {
     digitalWrite(GREEN_P2, HIGH);
     digitalWrite(RED_P2, LOW);
   }
 
+  // ===================================================
+  // P3
+  // ===================================================
   if (p3State == WRONG_ALERT) {
     digitalWrite(GREEN_P3, LOW);
     digitalWrite(RED_P3, blinkState);
-    if (blinkState) buzzer = true;
-  } else if (stableIR3) {
-    digitalWrite(GREEN_P3, LOW);
-    digitalWrite(RED_P3, HIGH);
+    buzzer = true;
   } else {
     digitalWrite(GREEN_P3, HIGH);
     digitalWrite(RED_P3, LOW);
   }
 
+  // أي موقف في حالة إنذار يجعل البازر مستمراً
   digitalWrite(BUZZER_PIN, buzzer ? HIGH : LOW);
 }
 
@@ -678,21 +739,21 @@ void updateOutputs() {
 // STATUS
 // ======================================================
 String getP1Status() {
-  if (p1State == WRONG_ALERT) return "تنبيه - بطاقة خاطئة";
+  if (p1State == WRONG_ALERT) return "تنبيه - مركبة غير مصرح بها";
   if (stableIR1) return "مشغول";
   if (p1State == AUTHORIZED_WAIT) return "تم قبول باص الأول";
   return "متاح";
 }
 
 String getP2Status() {
-  if (p2State == WRONG_ALERT) return "تنبيه - بطاقة خاطئة";
+  if (p2State == WRONG_ALERT) return "تنبيه - مركبة غير مصرح بها";
   if (stableIR2) return "مشغول";
   if (p2State == AUTHORIZED_WAIT) return "تم قبول باص الثاني";
   return "متاح";
 }
 
 String getP3Status() {
-  if (p3State == WRONG_ALERT) return "تنبيه - بطاقة غير مصرح بها";
+  if (p3State == WRONG_ALERT) return "تنبيه - مركبة غير مصرح بها";
   if (stableIR3) return "مشغول";
   if (p3State == AUTHORIZED_WAIT) return "تم قبول الحجز";
   if (p3Booked) return "محجوز";
