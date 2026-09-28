@@ -270,7 +270,7 @@ fun SmartParkingApp(
     }
 
     val deviceOnline = state.systemOnline && state.lastSeen > 0 &&
-        (now - state.lastSeen) < 60000
+        (now - state.lastSeen) < 120000
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
