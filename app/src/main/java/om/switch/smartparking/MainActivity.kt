@@ -50,6 +50,10 @@ data class ParkingUiState(
     val bookingName: String = "",
     val bookingPlate: String = "",
     val bookingUid: String = "",
+    val bookingArrival: String = "",
+    val bookingDurationMinutes: Int = 0,
+    val bookingEndTime: String = "",
+    val bookingCostOMR: Double = 0.0,
     val systemOnline: Boolean = false,
     val lastSeen: Long = 0L,
     val lastEvent: String = "بانتظار الاتصال",
@@ -107,7 +111,11 @@ class FirebaseParkingRepository {
                     bookingActive = snapshot.child("active").getValue(Boolean::class.java) ?: false,
                     bookingName = snapshot.child("name").getValue(String::class.java) ?: "",
                     bookingPlate = snapshot.child("plate").getValue(String::class.java) ?: "",
-                    bookingUid = snapshot.child("uid").getValue(String::class.java) ?: ""
+                    bookingUid = snapshot.child("uid").getValue(String::class.java) ?: "",
+                    bookingArrival = snapshot.child("arrivalTime").getValue(String::class.java) ?: "",
+                    bookingDurationMinutes = snapshot.child("durationMinutes").getValue(Int::class.java) ?: 0,
+                    bookingEndTime = snapshot.child("endTime").getValue(String::class.java) ?: "",
+                    bookingCostOMR = snapshot.child("costOMR").getValue(Double::class.java) ?: 0.0
                 )
                 emit()
             }
@@ -161,7 +169,16 @@ class FirebaseParkingRepository {
         })
     }
 
-    fun saveBooking(name: String, plate: String, uid: String, done: (Boolean, String) -> Unit) {
+    fun saveBooking(
+        name: String,
+        plate: String,
+        uid: String,
+        arrivalTime: String,
+        durationMinutes: Int,
+        endTime: String,
+        costOMR: Double,
+        done: (Boolean, String) -> Unit
+    ) {
         val ref = root ?: run {
             done(false, "Realtime Database غير مهيأة")
             return
@@ -178,13 +195,17 @@ class FirebaseParkingRepository {
             "name" to name.trim(),
             "plate" to plate.trim(),
             "uid" to cleanUid,
+            "arrivalTime" to arrivalTime,
+            "durationMinutes" to durationMinutes,
+            "endTime" to endTime,
+            "costOMR" to costOMR,
             "createdAt" to ServerValue.TIMESTAMP
         )
 
         ref.child("booking").child("P3").setValue(data)
             .addOnSuccessListener {
                 ref.child("system").child("lastEvent").setValue("P3 Booking Created")
-                addEvent("تم إنشاء حجز جديد لـ P3", "booking", "P3")
+                addEvent("تم إنشاء حجز P3 • " + arrivalTime + " • " + durationMinutes + " دقيقة", "booking", "P3")
                 done(true, "تم تأكيد الحجز")
             }
             .addOnFailureListener {
@@ -202,7 +223,11 @@ class FirebaseParkingRepository {
             "active" to false,
             "name" to "",
             "plate" to "",
-            "uid" to ""
+            "uid" to "",
+            "arrivalTime" to "",
+            "durationMinutes" to 0,
+            "endTime" to "",
+            "costOMR" to 0.0
         )
 
         ref.child("booking").child("P3").setValue(data)
@@ -233,6 +258,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
+            var showSplash by remember { mutableStateOf(true) }
+
+            LaunchedEffect(Unit) {
+                delay(1400)
+                showSplash = false
+            }
+
             val prefs = remember { getSharedPreferences("smart_parking_settings", MODE_PRIVATE) }
             var darkMode by remember { mutableStateOf(prefs.getBoolean("dark_mode", false)) }
             var isArabic by remember { mutableStateOf(prefs.getBoolean("arabic", true)) }
@@ -261,18 +293,22 @@ class MainActivity : ComponentActivity() {
                 LocalLayoutDirection provides if (isArabic) LayoutDirection.Rtl else LayoutDirection.Ltr
             ) {
                 MaterialTheme(colorScheme = scheme) {
-                    SmartParkingApp(
-                        darkMode = darkMode,
-                        isArabic = isArabic,
-                        onDarkModeChange = {
-                            darkMode = it
-                            prefs.edit().putBoolean("dark_mode", it).apply()
-                        },
-                        onLanguageChange = {
-                            isArabic = it
-                            prefs.edit().putBoolean("arabic", it).apply()
-                        }
-                    )
+                    if (showSplash) {
+                        SchoolOmanSplash(isArabic = isArabic)
+                    } else {
+                        SmartParkingApp(
+                            darkMode = darkMode,
+                            isArabic = isArabic,
+                            onDarkModeChange = {
+                                darkMode = it
+                                prefs.edit().putBoolean("dark_mode", it).apply()
+                            },
+                            onLanguageChange = {
+                                isArabic = it
+                                prefs.edit().putBoolean("arabic", it).apply()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -329,8 +365,10 @@ fun SmartParkingApp(
                 Modifier.padding(padding),
                 state,
                 isArabic,
-                onSave = { name, plate, uid ->
-                    repo.saveBooking(name, plate, uid) { _, msg -> snackbarMessage = msg }
+                onSave = { name, plate, uid, arrival, duration, endTime, cost ->
+                    repo.saveBooking(name, plate, uid, arrival, duration, endTime, cost) { _, msg ->
+                        snackbarMessage = msg
+                    }
                 },
                 onClear = {
                     repo.clearBooking { _, msg -> snackbarMessage = msg }
@@ -367,9 +405,13 @@ fun AppHeader(isArabic: Boolean, online: Boolean) {
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("Smart Parking", fontWeight = FontWeight.Bold, fontSize = 20.sp)
                 Text(
-                    tr(isArabic, "نظام المواقف الذكية", "Smart parking management"),
+                    tr(isArabic, "مواقف مدارس عمان الذكية", "SCHOOL OMAN PARKING SMART"),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+                Text(
+                    tr(isArabic, "نظام ذكي لإدارة مواقف المدارس", "Smart school parking management"),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
@@ -439,8 +481,11 @@ fun DashboardScreen(
         Text(tr(isArabic, "لوحة التحكم", "Dashboard"),
             style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            tr(isArabic, "متابعة المواقف والحالات بشكل مباشر عبر Firebase",
-                "Live parking status through Firebase"),
+            tr(
+                isArabic,
+                "متابعة مواقف الحافلات والحجوزات والتنبيهات بشكل مباشر",
+                "Live school-bus parking, booking and alert monitoring"
+            ),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
@@ -535,39 +580,100 @@ fun BookingScreen(
     modifier: Modifier,
     state: ParkingUiState,
     isArabic: Boolean,
-    onSave: (String, String, String) -> Unit,
+    onSave: (String, String, String, String, Int, String, Double) -> Unit,
     onClear: () -> Unit
 ) {
     var name by rememberSaveable { mutableStateOf("") }
     var plate by rememberSaveable { mutableStateOf("") }
     var uid by rememberSaveable { mutableStateOf("") }
+    var arrivalTime by rememberSaveable { mutableStateOf(defaultArrivalTime()) }
+    var durationMinutes by rememberSaveable { mutableIntStateOf(30) }
+    var showDurationMenu by remember { mutableStateOf(false) }
+
+    val durationOptions = listOf(30, 60, 90, 120)
+    val endTime = remember(arrivalTime, durationMinutes) {
+        calculateEndTime(arrivalTime, durationMinutes)
+    }
+    val cost = remember(durationMinutes) {
+        (durationMinutes / 30.0) * 0.500
+    }
 
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text(tr(isArabic, "حجز الموقف P3", "P3 Booking"),
-            style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(
+            tr(isArabic, "حجز الموقف P3", "P3 Booking"),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            tr(
+                isArabic,
+                "أدخل بيانات المركبة ووقت الوصول، وسيتم حساب نهاية الحجز والتكلفة تلقائيًا.",
+                "Enter vehicle and arrival details. End time and estimated cost are calculated automatically."
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         if (state.bookingActive) {
             Card(
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF2A000).copy(alpha = 0.12f))
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFFF2A000).copy(alpha = 0.10f)
+                )
             ) {
-                Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    Modifier.fillMaxWidth().padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(13.dp)
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.EventAvailable, null, tint = Color(0xFFF2A000))
                         Spacer(Modifier.width(10.dp))
-                        Text(tr(isArabic, "الحجز فعال", "Active booking"), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Column {
+                            Text(
+                                tr(isArabic, "حجز P3 فعال", "P3 booking active"),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            )
+                            Text(
+                                tr(isArabic, "موقف مخصص حتى نهاية الحجز", "Reserved until booking end time"),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
+
+                    HorizontalDivider()
+
                     BookingInfo(Icons.Filled.Person, tr(isArabic, "الاسم", "Name"), state.bookingName)
                     BookingInfo(Icons.Filled.DirectionsCar, tr(isArabic, "رقم المركبة", "Plate"), state.bookingPlate)
                     BookingInfo(Icons.Filled.CreditCard, "UID", state.bookingUid)
+                    BookingInfo(Icons.Filled.AccessTime, tr(isArabic, "وقت الوصول", "Arrival"), state.bookingArrival)
+                    BookingInfo(
+                        Icons.Filled.Timer,
+                        tr(isArabic, "مدة الحجز", "Duration"),
+                        if (state.bookingDurationMinutes > 0)
+                            "${state.bookingDurationMinutes} ${tr(isArabic, "دقيقة", "min")}"
+                        else "-"
+                    )
+                    BookingInfo(Icons.Filled.Schedule, tr(isArabic, "ينتهي", "Ends"), state.bookingEndTime)
+                    BookingInfo(
+                        Icons.Filled.Payments,
+                        tr(isArabic, "التكلفة التقديرية", "Estimated cost"),
+                        if (state.bookingCostOMR > 0)
+                            String.format(Locale.US, "%.3f OMR", state.bookingCostOMR)
+                        else "0.000 OMR"
+                    )
+
+                    Spacer(Modifier.height(4.dp))
 
                     Button(
                         onClick = onClear,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
                     ) {
                         Icon(Icons.Filled.Delete, null)
                         Spacer(Modifier.width(8.dp))
@@ -576,30 +682,120 @@ fun BookingScreen(
                 }
             }
         } else {
-            Card(shape = RoundedCornerShape(22.dp)) {
-                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Card(shape = RoundedCornerShape(24.dp)) {
+                Column(
+                    Modifier.fillMaxWidth().padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     OutlinedTextField(
-                        value = name, onValueChange = { name = it }, modifier = Modifier.fillMaxWidth(),
+                        value = name,
+                        onValueChange = { name = it },
+                        modifier = Modifier.fillMaxWidth(),
                         label = { Text(tr(isArabic, "اسم صاحب الحجز", "Driver name")) },
-                        leadingIcon = { Icon(Icons.Filled.Person, null) }, singleLine = true
+                        leadingIcon = { Icon(Icons.Filled.Person, null) },
+                        singleLine = true
                     )
+
                     OutlinedTextField(
-                        value = plate, onValueChange = { plate = it }, modifier = Modifier.fillMaxWidth(),
+                        value = plate,
+                        onValueChange = { plate = it },
+                        modifier = Modifier.fillMaxWidth(),
                         label = { Text(tr(isArabic, "رقم المركبة", "Vehicle plate")) },
-                        leadingIcon = { Icon(Icons.Filled.DirectionsCar, null) }, singleLine = true
+                        leadingIcon = { Icon(Icons.Filled.DirectionsCar, null) },
+                        singleLine = true
                     )
+
                     OutlinedTextField(
-                        value = uid, onValueChange = { uid = it }, modifier = Modifier.fillMaxWidth(),
-                        label = { Text("UID") }, placeholder = { Text("12 34 56 78") },
-                        leadingIcon = { Icon(Icons.Filled.CreditCard, null) }, singleLine = true
+                        value = uid,
+                        onValueChange = { uid = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("UID") },
+                        placeholder = { Text("12 34 56 78") },
+                        leadingIcon = { Icon(Icons.Filled.CreditCard, null) },
+                        singleLine = true
                     )
+
+                    OutlinedTextField(
+                        value = arrivalTime,
+                        onValueChange = { value ->
+                            if (value.length <= 5) arrivalTime = value
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(tr(isArabic, "وقت الوصول", "Arrival time")) },
+                        placeholder = { Text("07:30") },
+                        leadingIcon = { Icon(Icons.Filled.AccessTime, null) },
+                        supportingText = {
+                            Text(tr(isArabic, "الصيغة 24 ساعة، مثال 07:30", "24-hour format, e.g. 07:30"))
+                        },
+                        singleLine = true
+                    )
+
+                    Box {
+                        OutlinedButton(
+                            onClick = { showDurationMenu = true },
+                            modifier = Modifier.fillMaxWidth().height(56.dp)
+                        ) {
+                            Icon(Icons.Filled.Timer, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "${tr(isArabic, "مدة الحجز", "Duration")}: " +
+                                    "$durationMinutes ${tr(isArabic, "دقيقة", "min")}"
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showDurationMenu,
+                            onDismissRequest = { showDurationMenu = false }
+                        ) {
+                            durationOptions.forEach { minutes ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text("$minutes ${tr(isArabic, "دقيقة", "min")}")
+                                    },
+                                    onClick = {
+                                        durationMinutes = minutes
+                                        showDurationMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.07f)
+                        ),
+                        shape = RoundedCornerShape(18.dp)
+                    ) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(15.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            BookingInfo(
+                                Icons.Filled.Schedule,
+                                tr(isArabic, "وقت انتهاء الحجز", "Booking ends"),
+                                endTime
+                            )
+                            BookingInfo(
+                                Icons.Filled.Payments,
+                                tr(isArabic, "التكلفة التقديرية", "Estimated cost"),
+                                String.format(Locale.US, "%.3f OMR", cost)
+                            )
+                        }
+                    }
+
                     Button(
                         onClick = {
-                            onSave(name, plate, uid)
-                            name = ""; plate = ""; uid = ""
+                            onSave(name, plate, uid, arrivalTime, durationMinutes, endTime, cost)
+                            name = ""
+                            plate = ""
+                            uid = ""
                         },
-                        enabled = name.isNotBlank() && plate.isNotBlank() && uid.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth().height(52.dp)
+                        enabled = name.isNotBlank() &&
+                            plate.isNotBlank() &&
+                            uid.isNotBlank() &&
+                            isValidTime(arrivalTime),
+                        modifier = Modifier.fillMaxWidth().height(54.dp)
                     ) {
                         Icon(Icons.Filled.CheckCircle, null)
                         Spacer(Modifier.width(8.dp))
@@ -672,21 +868,83 @@ fun AlertsScreen(modifier: Modifier, state: ParkingUiState, isArabic: Boolean) {
 
 @Composable
 fun EventsScreen(modifier: Modifier, events: List<EventItem>, isArabic: Boolean) {
+    var filter by rememberSaveable { mutableStateOf("all") }
+
+    val filters = listOf(
+        "all" to tr(isArabic, "الكل", "All"),
+        "alert" to tr(isArabic, "تنبيهات", "Alerts"),
+        "booking" to tr(isArabic, "حجوزات", "Bookings"),
+        "movement" to tr(isArabic, "دخول/خروج", "Entry/Exit")
+    )
+
+    val filtered = events.filter {
+        when (filter) {
+            "alert" -> it.type == "alert"
+            "booking" -> it.type == "booking"
+            "movement" -> it.type == "entry" || it.type == "exit"
+            else -> true
+        }
+    }
+
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(tr(isArabic, "سجل الأحداث", "Event history"),
-            style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(
+            tr(isArabic, "سجل النظام", "System Log"),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            tr(
+                isArabic,
+                "سجل موحد للحجوزات والتنبيهات وحركة المركبات.",
+                "Unified log for bookings, alerts and vehicle movement."
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
-        if (events.isEmpty()) {
-            Text(tr(isArabic, "سيظهر هنا سجل الدخول والخروج والتنبيهات.",
-                "Entry, exit and alert events will appear here."),
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            filters.forEach { (key, label) ->
+                FilterChip(
+                    selected = filter == key,
+                    onClick = { filter = key },
+                    label = { Text(label, fontSize = 11.sp) }
+                )
+            }
+        }
+
+        if (filtered.isEmpty()) {
+            Card(shape = RoundedCornerShape(18.dp)) {
+                Text(
+                    tr(isArabic, "لا توجد أحداث ضمن هذا التصنيف.", "No events in this category."),
+                    modifier = Modifier.padding(18.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         } else {
-            events.forEach { event ->
-                Card(shape = RoundedCornerShape(18.dp)) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            filtered.forEach { event ->
+                val eventColor = when (event.type) {
+                    "alert" -> MaterialTheme.colorScheme.error
+                    "booking" -> Color(0xFFF2A000)
+                    "entry" -> Color(0xFF159447)
+                    "exit" -> Color(0xFF0B57D0)
+                    else -> MaterialTheme.colorScheme.primary
+                }
+
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = eventColor.copy(alpha = 0.07f)
+                    )
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         val icon = when (event.type) {
                             "alert" -> Icons.Filled.Warning
                             "entry" -> Icons.Filled.Login
@@ -694,14 +952,27 @@ fun EventsScreen(modifier: Modifier, events: List<EventItem>, isArabic: Boolean)
                             "booking" -> Icons.Filled.EventAvailable
                             else -> Icons.Filled.Info
                         }
-                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+
+                        Box(
+                            Modifier.size(40.dp).background(
+                                eventColor.copy(alpha = 0.14f),
+                                CircleShape
+                            ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(icon, null, tint = eventColor)
+                        }
+
                         Spacer(Modifier.width(12.dp))
+
                         Column(Modifier.weight(1f)) {
                             Text(event.message, fontWeight = FontWeight.SemiBold)
                             Text(
                                 listOf(event.parking, formatTime(event.timestamp))
-                                    .filter { it.isNotBlank() }.joinToString(" • "),
-                                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" • "),
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -739,7 +1010,12 @@ fun SettingsScreen(
                     if (configured) tr(isArabic, "مهيأ", "Configured") else tr(isArabic, "غير مهيأ", "Not configured"))
                 BookingInfo(Icons.Filled.Router, "ESP32",
                     if (online) tr(isArabic, "متصل", "Online") else tr(isArabic, "غير متصل", "Offline"))
-                BookingInfo(Icons.Filled.Info, tr(isArabic, "إصدار التطبيق", "App version"), "3.0.0")
+                BookingInfo(
+                    Icons.Filled.School,
+                    tr(isArabic, "الهوية", "Identity"),
+                    tr(isArabic, "مواقف مدارس عمان الذكية", "SCHOOL OMAN PARKING SMART")
+                )
+                BookingInfo(Icons.Filled.Info, tr(isArabic, "إصدار التطبيق", "App version"), "4.0.0")
             }
         }
     }
@@ -759,6 +1035,98 @@ fun SettingSwitch(
             Text(title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
             Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
+    }
+}
+
+@Composable
+fun SchoolOmanSplash(isArabic: Boolean) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.primary),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                Modifier
+                    .size(112.dp)
+                    .background(Color.White.copy(alpha = 0.14f), RoundedCornerShape(32.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Filled.School,
+                        null,
+                        tint = Color.White,
+                        modifier = Modifier.size(42.dp)
+                    )
+                    Icon(
+                        Icons.Filled.DirectionsBus,
+                        null,
+                        tint = Color.White,
+                        modifier = Modifier.size(42.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            Text(
+                if (isArabic) "مواقف مدارس عمان الذكية" else "SCHOOL OMAN PARKING SMART",
+                color = Color.White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                if (isArabic) "نظام ذكي وآمن لمواقف المدارس" else "Smart & safe school parking",
+                color = Color.White.copy(alpha = 0.82f),
+                fontSize = 14.sp
+            )
+
+            Spacer(Modifier.height(26.dp))
+
+            CircularProgressIndicator(
+                color = Color.White,
+                strokeWidth = 3.dp,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+    }
+}
+
+fun defaultArrivalTime(): String {
+    val format = SimpleDateFormat("HH:mm", Locale.US)
+    return format.format(Date())
+}
+
+fun isValidTime(value: String): Boolean {
+    return try {
+        val format = SimpleDateFormat("HH:mm", Locale.US)
+        format.isLenient = false
+        format.parse(value)
+        true
+    } catch (_: Exception) {
+        false
+    }
+}
+
+fun calculateEndTime(arrival: String, durationMinutes: Int): String {
+    return try {
+        val format = SimpleDateFormat("HH:mm", Locale.US)
+        format.isLenient = false
+        val date = format.parse(arrival) ?: return "-"
+        val calendar = Calendar.getInstance()
+        calendar.time = date
+        calendar.add(Calendar.MINUTE, durationMinutes)
+        format.format(calendar.time)
+    } catch (_: Exception) {
+        "-"
     }
 }
 
