@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "216477778163",
+    "project_id": "com-example-aswitch-743a8",
+    "storage_bucket": "com-example-aswitch-743a8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:216477778163:android:cb9d9c2eb1f67c54063786",
+        "android_client_info": {
+          "package_name": "com.example.aswitch"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDcMBhShsRrF_wVKX69LjbNeqgmcASPJEQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:216477778163:android:815aad864eb12732063786",
+        "android_client_info": {
+          "package_name": "om.switch.smartparking"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDcMBhShsRrF_wVKX69LjbNeqgmcASPJEQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
