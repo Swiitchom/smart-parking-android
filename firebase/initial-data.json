@@ -1,0 +1,14 @@
+{
+  "parking": {
+    "P1": {"name":"Bus 1","status":"متاح","occupied":false,"alert":false},
+    "P2": {"name":"Bus 2","status":"متاح","occupied":false,"alert":false},
+    "P3": {"name":"Booking","status":"متاح للحجز","occupied":false,"alert":false}
+  },
+  "booking": {
+    "P3": {"active":false,"name":"","plate":"","uid":""}
+  },
+  "system": {
+    "online": false,
+    "lastEvent": "Firebase initialized"
+  }
+}
