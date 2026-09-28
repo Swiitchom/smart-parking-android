@@ -13,8 +13,8 @@ android {
         applicationId = "om.switch.smartparking"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "3.0.0"
+        versionCode = 4
+        versionName = "4.0.0"
 
         val databaseUrl = providers.gradleProperty("FIREBASE_DATABASE_URL").orNull ?: ""
         buildConfigField("String", "FIREBASE_DATABASE_URL", "\"$databaseUrl\"")
