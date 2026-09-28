@@ -69,10 +69,16 @@ class FirebaseParkingRepository {
             return
         }
 
-        ref.addValueEventListener(object : ValueEventListener {
+        var current = ParkingUiState(configured = true)
+
+        fun emit() {
+            onChange(current)
+        }
+
+        ref.child("parking").addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 fun spot(code: String): ParkingSpot {
-                    val s = snapshot.child("parking").child(code)
+                    val s = snapshot.child(code)
                     return ParkingSpot(
                         status = s.child("status").getValue(String::class.java) ?: "متاح",
                         occupied = s.child("occupied").getValue(Boolean::class.java) ?: false,
@@ -80,9 +86,61 @@ class FirebaseParkingRepository {
                     )
                 }
 
-                val booking = snapshot.child("booking").child("P3")
-                val events = snapshot.child("events").children.mapNotNull { e ->
-                    val message = e.child("message").getValue(String::class.java) ?: return@mapNotNull null
+                current = current.copy(
+                    p1 = spot("P1"),
+                    p2 = spot("P2"),
+                    p3 = spot("P3"),
+                    configured = true
+                )
+                emit()
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                current = current.copy(lastEvent = "parking: ${error.message}")
+                emit()
+            }
+        })
+
+        ref.child("booking").child("P3").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                current = current.copy(
+                    bookingActive = snapshot.child("active").getValue(Boolean::class.java) ?: false,
+                    bookingName = snapshot.child("name").getValue(String::class.java) ?: "",
+                    bookingPlate = snapshot.child("plate").getValue(String::class.java) ?: "",
+                    bookingUid = snapshot.child("uid").getValue(String::class.java) ?: ""
+                )
+                emit()
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                current = current.copy(lastEvent = "booking: ${error.message}")
+                emit()
+            }
+        })
+
+        ref.child("system").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                current = current.copy(
+                    systemOnline = snapshot.child("online").getValue(Boolean::class.java) ?: false,
+                    lastSeen = snapshot.child("lastSeen").getValue(Long::class.java) ?: 0L,
+                    lastEvent = snapshot.child("lastEvent").getValue(String::class.java)
+                        ?: current.lastEvent
+                )
+                emit()
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                current = current.copy(lastEvent = "system: ${error.message}")
+                emit()
+            }
+        })
+
+        ref.child("events").limitToLast(30).addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val items = snapshot.children.mapNotNull { e ->
+                    val message = e.child("message").getValue(String::class.java)
+                        ?: return@mapNotNull null
+
                     EventItem(
                         id = e.key ?: "",
                         message = message,
@@ -90,34 +148,15 @@ class FirebaseParkingRepository {
                         parking = e.child("parking").getValue(String::class.java) ?: "",
                         timestamp = e.child("timestamp").getValue(Long::class.java) ?: 0L
                     )
-                }.sortedByDescending { it.timestamp }.take(30)
+                }.sortedByDescending { it.timestamp }
 
-                onChange(
-                    ParkingUiState(
-                        p1 = spot("P1"),
-                        p2 = spot("P2"),
-                        p3 = spot("P3"),
-                        bookingActive = booking.child("active").getValue(Boolean::class.java) ?: false,
-                        bookingName = booking.child("name").getValue(String::class.java) ?: "",
-                        bookingPlate = booking.child("plate").getValue(String::class.java) ?: "",
-                        bookingUid = booking.child("uid").getValue(String::class.java) ?: "",
-                        systemOnline = snapshot.child("system").child("online").getValue(Boolean::class.java) ?: false,
-                        lastSeen = snapshot.child("system").child("lastSeen").getValue(Long::class.java) ?: 0L,
-                        lastEvent = snapshot.child("system").child("lastEvent").getValue(String::class.java)
-                            ?: "لا توجد أحداث",
-                        events = events,
-                        configured = true
-                    )
-                )
+                current = current.copy(events = items)
+                emit()
             }
 
             override fun onCancelled(error: DatabaseError) {
-                onChange(
-                    ParkingUiState(
-                        lastEvent = "Firebase: ${error.message}",
-                        configured = true
-                    )
-                )
+                current = current.copy(lastEvent = "events: ${error.message}")
+                emit()
             }
         })
     }
