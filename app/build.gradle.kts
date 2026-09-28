@@ -13,8 +13,8 @@ android {
         applicationId = "om.switch.smartparking"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "3.0.0"
 
         val databaseUrl = providers.gradleProperty("FIREBASE_DATABASE_URL").orNull ?: ""
         buildConfigField("String", "FIREBASE_DATABASE_URL", "\"$databaseUrl\"")
@@ -30,18 +30,15 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 }
 
 dependencies {
     implementation("androidx.activity:activity-compose:1.13.0")
-
-    // Compose 1.11.x stays compatible with the current SDK 36 / AGP 8.13 toolchain.
     implementation("androidx.compose.ui:ui:1.11.4")
     implementation("androidx.compose.foundation:foundation:1.11.4")
     implementation("androidx.compose.material3:material3:1.3.2")
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
 
     implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
     implementation("com.google.firebase:firebase-database")

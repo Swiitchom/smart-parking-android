@@ -1,28 +1,39 @@
-# Smart Parking Android
+# Smart Parking Android V3
 
-Package: `om.switch.smartparking`
+نسخة احترافية متكاملة للمواقف الذكية.
 
-## جاهز الآن
-- Android + Jetpack Compose
-- Firebase config مضاف
-- Realtime Database dependency
-- GitHub Action لبناء APK
-- GitHub Action لتوزيع APK عبر Firebase App Distribution
+## المميزات
+- Dashboard مباشر لـ P1 / P2 / P3
+- حجز P3 من التطبيق
+- تنبيهات مباشرة
+- سجل أحداث Firebase
+- عربي / English
+- Dark Mode
+- أيقونة تطبيق Adaptive
+- Firebase Realtime Database
+- ESP32 + 3× RC522 + IR + LEDs + Buzzer
+- GitHub Actions يبني APK تلقائيًا
 
-## Firebase Realtime Database
-`https://com-example-aswitch-743a8-default-rtdb.firebaseio.com/`
+## Firebase applicationId
+`om.switch.smartparking`
 
-## GitHub Actions
-- `.github/workflows/build-apk.yml` يبني APK تلقائيًا على main.
-- `.github/workflows/firebase-distribution.yml` جاهز للتوزيع بعد إضافة Secrets.
-
-## App Distribution Secrets
-- `FIREBASE_SERVICE_ACCOUNT_JSON`
-- `FIREBASE_TESTERS`
-
-## Security
-قاعدة البيانات النهائية موجودة في `firebase/database.rules.json` ومقفلة افتراضيًا.
-يوجد ملف تطوير منفصل `firebase/database.rules.DEVELOPMENT.json` للاختبار فقط.
+## Android namespace
+`om.swiitch.smartparking`
 
 ## ESP32
-المرحلة التالية: ربط نفس منطق RC522 + IR + LEDs + Buzzer مع Firebase بدل WebServer المحلي.
+الكود الكامل:
+`esp32/smart_parking_firebase.ino`
+
+غيّر فقط:
+- WIFI_NAME
+- WIFI_PASSWORD
+
+بقية GPIOs والتوصيلات محفوظة كما كانت.
+
+## Firebase paths
+- `parking/P1`
+- `parking/P2`
+- `parking/P3`
+- `booking/P3`
+- `system`
+- `events`
