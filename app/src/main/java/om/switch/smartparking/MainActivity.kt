@@ -1,4 +1,4 @@
-package om.switch.smartparking
+package om.swiitch.smartparking
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
