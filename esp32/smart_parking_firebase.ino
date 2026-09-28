@@ -61,7 +61,7 @@ String P3_NAME = "";
 String P3_PLATE = "";
 
 unsigned long lastBookingRead = 0;
-const unsigned long BOOKING_READ_INTERVAL = 2500;
+const unsigned long BOOKING_READ_INTERVAL = 5000;
 
 // ======================================================
 // STATES
@@ -118,7 +118,7 @@ unsigned long lastBlink = 0;
 bool blinkState = false;
 
 unsigned long lastFirebaseSync = 0;
-const unsigned long FIREBASE_INTERVAL = 2000;
+const unsigned long FIREBASE_INTERVAL = 3000;
 
 unsigned long lastWiFiCheck = 0;
 String lastEvent = "System Started";
@@ -290,6 +290,7 @@ int firebaseRequest(
 
   if (!https.begin(client, url)) return -2;
 
+  https.setTimeout(5000);
   https.addHeader("Content-Type", "application/json");
 
   int code = -3;
@@ -835,8 +836,6 @@ void setup() {
 void loop() {
   keepWiFiConnected();
 
-  readP3Booking();
-
   checkP1();
   checkP2();
   checkP3();
@@ -845,8 +844,12 @@ void loop() {
   updateParkingLogic();
   updateOutputs();
 
+  // نرسل حالة الجهاز أولاً حتى يبقى lastSeen محدثاً باستمرار
   sendPendingEvent();
   syncFirebase();
+
+  // بعدها نقرأ حجز P3 من Firebase
+  readP3Booking();
 
   delay(5);
 }
