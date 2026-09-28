@@ -1,0 +1,9 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "parking": {".read": true, ".write": true},
+    "booking": {".read": true, ".write": true},
+    "system": {".read": true, ".write": true}
+  }
+}
