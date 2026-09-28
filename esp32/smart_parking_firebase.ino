@@ -128,6 +128,9 @@ String pendingEventMessage = "";
 String pendingEventType = "info";
 String pendingEventParking = "";
 
+SemaphoreHandle_t dataMutex;
+TaskHandle_t firebaseTaskHandle = nullptr;
+
 // ======================================================
 // HELPERS
 // ======================================================
@@ -218,11 +221,15 @@ bool jsonBoolValue(const String &json, const String &key, bool defaultValue = fa
 }
 
 void setEvent(String message, String type, String parking) {
+  if (dataMutex != nullptr) xSemaphoreTake(dataMutex, portMAX_DELAY);
+
   lastEvent = message;
   pendingEventMessage = message;
   pendingEventType = type;
   pendingEventParking = parking;
   eventPending = true;
+
+  if (dataMutex != nullptr) xSemaphoreGive(dataMutex);
 
   Serial.println();
   Serial.print("EVENT: ");
@@ -353,6 +360,8 @@ void readP3Booking() {
     newName != P3_NAME ||
     newPlate != P3_PLATE;
 
+  if (dataMutex != nullptr) xSemaphoreTake(dataMutex, portMAX_DELAY);
+
   p3Booked = newBooked;
   P3_UID = newUid;
   P3_NAME = newName;
@@ -361,6 +370,8 @@ void readP3Booking() {
   if (!p3Booked && p3State == AUTHORIZED_WAIT) {
     p3State = FREE;
   }
+
+  if (dataMutex != nullptr) xSemaphoreGive(dataMutex);
 
   if (changed) {
     Serial.println();
@@ -491,11 +502,23 @@ void checkP3() {
 
   String uid = getUID(rfid3);
 
+  bool booked;
+  String bookedUid;
+  String bookedName;
+  String bookedPlate;
+
+  if (dataMutex != nullptr) xSemaphoreTake(dataMutex, portMAX_DELAY);
+  booked = p3Booked;
+  bookedUid = P3_UID;
+  bookedName = P3_NAME;
+  bookedPlate = P3_PLATE;
+  if (dataMutex != nullptr) xSemaphoreGive(dataMutex);
+
   Serial.println();
   Serial.print("P3 CARD: ");
   Serial.println(uid);
 
-  if (p3Booked && P3_UID.length() > 0 && uid == P3_UID) {
+  if (booked && bookedUid.length() > 0 && uid == bookedUid) {
     p3State = AUTHORIZED_WAIT;
     p3EntryTimer = millis();
     p3WrongSawCar = false;
@@ -503,15 +526,15 @@ void checkP3() {
     setEvent("P3 Booking Accepted", "entry", "P3");
 
     Serial.print("NAME: ");
-    Serial.println(P3_NAME);
+    Serial.println(bookedName);
     Serial.print("PLATE: ");
-    Serial.println(P3_PLATE);
+    Serial.println(bookedPlate);
   } else {
     p3State = WRONG_ALERT;
     p3WrongSawCar = false;
     p3WrongStart = millis();
 
-    if (!p3Booked) setEvent("P3 No Booking", "alert", "P3");
+    if (!booked) setEvent("P3 No Booking", "alert", "P3");
     else setEvent("P3 Wrong Card", "alert", "P3");
   }
 
@@ -680,13 +703,29 @@ String getP3Status() {
 // SEND EVENT TO FIREBASE
 // ======================================================
 void sendPendingEvent() {
-  if (!eventPending) return;
+  String eventMessage;
+  String eventType;
+  String eventParking;
+  bool hasEvent = false;
+
+  if (dataMutex != nullptr) xSemaphoreTake(dataMutex, portMAX_DELAY);
+
+  hasEvent = eventPending;
+  if (hasEvent) {
+    eventMessage = pendingEventMessage;
+    eventType = pendingEventType;
+    eventParking = pendingEventParking;
+  }
+
+  if (dataMutex != nullptr) xSemaphoreGive(dataMutex);
+
+  if (!hasEvent) return;
   if (WiFi.status() != WL_CONNECTED) return;
 
   String body = "{";
-  body += "\"message\":\"" + jsonEscape(pendingEventMessage) + "\",";
-  body += "\"type\":\"" + jsonEscape(pendingEventType) + "\",";
-  body += "\"parking\":\"" + jsonEscape(pendingEventParking) + "\",";
+  body += "\"message\":\"" + jsonEscape(eventMessage) + "\",";
+  body += "\"type\":\"" + jsonEscape(eventType) + "\",";
+  body += "\"parking\":\"" + jsonEscape(eventParking) + "\",";
   body += "\"timestamp\":{\".sv\":\"timestamp\"}";
   body += "}";
 
@@ -699,7 +738,14 @@ void sendPendingEvent() {
   );
 
   if (code >= 200 && code < 300) {
-    eventPending = false;
+    if (dataMutex != nullptr) xSemaphoreTake(dataMutex, portMAX_DELAY);
+
+    // لا نمسح حدثاً أحدث وصل أثناء الإرسال
+    if (pendingEventMessage == eventMessage) {
+      eventPending = false;
+    }
+
+    if (dataMutex != nullptr) xSemaphoreGive(dataMutex);
   }
 }
 
@@ -711,6 +757,14 @@ void syncFirebase() {
   if (millis() - lastFirebaseSync < FIREBASE_INTERVAL) return;
 
   lastFirebaseSync = millis();
+
+  String eventSnapshot;
+  bool p3BookedSnapshot;
+
+  if (dataMutex != nullptr) xSemaphoreTake(dataMutex, portMAX_DELAY);
+  eventSnapshot = lastEvent;
+  p3BookedSnapshot = p3Booked;
+  if (dataMutex != nullptr) xSemaphoreGive(dataMutex);
 
   String json = "{";
 
@@ -738,7 +792,7 @@ void syncFirebase() {
 
   json += "\"system\":{";
   json += "\"online\":true,";
-  json += "\"lastEvent\":\"" + jsonEscape(lastEvent) + "\",";
+  json += "\"lastEvent\":\"" + jsonEscape(eventSnapshot) + "\",";
   json += "\"lastSeen\":{\".sv\":\"timestamp\"}";
   json += "}";
 
@@ -764,6 +818,24 @@ void syncFirebase() {
   } else {
     Serial.print("Firebase Sync ERROR: ");
     Serial.println(code);
+  }
+}
+
+// ======================================================
+// FIREBASE BACKGROUND TASK
+// Core 0: جميع طلبات HTTPS هنا حتى لا توقف قارئات RFID
+// ======================================================
+void firebaseWorker(void *parameter) {
+  for (;;) {
+    keepWiFiConnected();
+
+    if (WiFi.status() == WL_CONNECTED) {
+      sendPendingEvent();
+      syncFirebase();
+      readP3Booking();
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
 
@@ -824,18 +896,31 @@ void setup() {
 
   connectWiFi();
 
+  dataMutex = xSemaphoreCreateMutex();
+
   setEvent("ESP32 Smart Parking Started", "info", "SYSTEM");
 
   lastFirebaseSync = 0;
   lastBookingRead = 0;
+
+  xTaskCreatePinnedToCore(
+    firebaseWorker,
+    "FirebaseTask",
+    12288,
+    nullptr,
+    1,
+    &firebaseTaskHandle,
+    0
+  );
+
+  Serial.println("Firebase background task started on Core 0");
 }
 
 // ======================================================
 // LOOP
 // ======================================================
 void loop() {
-  keepWiFiConnected();
-
+  // Core 1: القارئات والحساسات فقط - بدون أي طلبات إنترنت
   checkP1();
   checkP2();
   checkP3();
@@ -844,12 +929,5 @@ void loop() {
   updateParkingLogic();
   updateOutputs();
 
-  // نرسل حالة الجهاز أولاً حتى يبقى lastSeen محدثاً باستمرار
-  sendPendingEvent();
-  syncFirebase();
-
-  // بعدها نقرأ حجز P3 من Firebase
-  readP3Booking();
-
-  delay(5);
+  delay(2);
 }
