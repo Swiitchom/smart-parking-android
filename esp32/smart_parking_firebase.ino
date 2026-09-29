@@ -247,31 +247,188 @@ void setEvent(String message, String type, String parking) {
 }
 
 // ======================================================
-// LCD 20x4 - TITLE FIXED / ALERT ONLY
+// LCD 20x4 - NORMAL TITLE / ALERT SCREEN ONLY
 // ======================================================
-void lcdClearRow(byte row) {
-  if (!lcdReady) return;
-  lcd.setCursor(0, row);
-  lcd.print("                    ");
+
+// 8 Arabic custom characters used to approximate:
+// "موقف ليس لك"
+// LCD 20x4 does not have native Arabic, so these are dot-matrix glyphs.
+byte AR_MEEM[8] = {
+  B00000,
+  B01110,
+  B10001,
+  B01111,
+  B00001,
+  B00001,
+  B00010,
+  B00100
+};
+
+byte AR_WAW[8] = {
+  B00000,
+  B00110,
+  B01001,
+  B01001,
+  B00111,
+  B00001,
+  B00010,
+  B01100
+};
+
+byte AR_QAF[8] = {
+  B01010,
+  B00000,
+  B01110,
+  B10001,
+  B10001,
+  B01111,
+  B00001,
+  B01110
+};
+
+byte AR_FAA[8] = {
+  B00100,
+  B00000,
+  B01110,
+  B10001,
+  B10001,
+  B01111,
+  B00001,
+  B00001
+};
+
+byte AR_LAM[8] = {
+  B00100,
+  B00100,
+  B00100,
+  B00100,
+  B00100,
+  B00100,
+  B00111,
+  B00000
+};
+
+byte AR_YAA[8] = {
+  B00000,
+  B10001,
+  B10001,
+  B01111,
+  B00001,
+  B00001,
+  B01010,
+  B00000
+};
+
+byte AR_SEEN[8] = {
+  B00000,
+  B00000,
+  B10101,
+  B10101,
+  B11111,
+  B00001,
+  B00001,
+  B00000
+};
+
+byte AR_KAF[8] = {
+  B00100,
+  B00110,
+  B00100,
+  B01100,
+  B10000,
+  B11111,
+  B00000,
+  B00000
+};
+
+void loadArabicLCDChars() {
+  lcd.createChar(0, AR_MEEM);
+  lcd.createChar(1, AR_WAW);
+  lcd.createChar(2, AR_QAF);
+  lcd.createChar(3, AR_FAA);
+  lcd.createChar(4, AR_LAM);
+  lcd.createChar(5, AR_YAA);
+  lcd.createChar(6, AR_SEEN);
+  lcd.createChar(7, AR_KAF);
 }
 
-void initLCD() {
-  Wire.begin(LCD_SDA, LCD_SCL);
-  lcd.init();
-  lcd.backlight();
+void showLCDNormalTitle() {
+  if (!lcdReady) return;
+
   lcd.clear();
 
   lcd.setCursor(0, 0);
   lcd.print("SCHOOL OMAN PARKING");
 
-  lcdClearRow(1);
-  lcdClearRow(2);
-  lcdClearRow(3);
+  lcd.setCursor(3, 1);
+  lcd.print("SMART PARKING");
+
+  lcd.setCursor(4, 2);
+  lcd.print("SYSTEM READY");
+
+  lcd.setCursor(0, 3);
+  lcd.print("                    ");
+}
+
+void printArabicNotYourParking() {
+  if (!lcdReady) return;
+
+  // Arabic is visually printed right-to-left.
+  // Left-to-right LCD sequence is therefore reversed:
+  // ك ل   س ي ل   ف ق و م
+  lcd.setCursor(4, 1);
+  lcd.write(byte(7)); // ك
+  lcd.write(byte(4)); // ل
+  lcd.print(" ");
+  lcd.write(byte(6)); // س
+  lcd.write(byte(5)); // ي
+  lcd.write(byte(4)); // ل
+  lcd.print(" ");
+  lcd.write(byte(3)); // ف
+  lcd.write(byte(2)); // ق
+  lcd.write(byte(1)); // و
+  lcd.write(byte(0)); // م
+}
+
+void initLCD() {
+  Wire.begin(LCD_SDA, LCD_SCL);
+
+  lcd.init();
+  lcd.backlight();
+
+  loadArabicLCDChars();
 
   lcdReady = true;
   lastLcdAlertMask = 0;
 
+  showLCDNormalTitle();
+
   Serial.println("LCD Ready at 0x27");
+}
+
+void showLCDAlert(int alertMask) {
+  if (!lcdReady) return;
+
+  lcd.clear();
+
+  // Built-in symbol style so we keep all 8 custom slots for Arabic.
+  lcd.setCursor(0, 0);
+  lcd.print("!!! [X] ALERT !!!");
+
+  printArabicNotYourParking();
+
+  String parkingList = "";
+  if (alertMask & 1) parkingList += "P1 ";
+  if (alertMask & 2) parkingList += "P2 ";
+  if (alertMask & 4) parkingList += "P3 ";
+  parkingList.trim();
+
+  lcd.setCursor(0, 2);
+  lcd.print("PARKING: ");
+  lcd.print(parkingList);
+
+  lcd.setCursor(0, 3);
+  lcd.print("SCAN CORRECT CARD");
 }
 
 void updateLCDAlertOnly() {
@@ -282,36 +439,16 @@ void updateLCDAlertOnly() {
   if (p2State == WRONG_ALERT) alertMask |= 2;
   if (p3State == WRONG_ALERT) alertMask |= 4;
 
-  // لا نرسل أي أوامر I2C إذا لم تتغير حالة التنبيه
+  // Zero I2C traffic while the state is unchanged.
   if (alertMask == lastLcdAlertMask) return;
 
   lastLcdAlertMask = alertMask;
 
-  // العنوان الرئيسي يبقى ثابت دائماً
-  lcd.setCursor(0, 0);
-  lcd.print("SCHOOL OMAN PARKING");
-
-  lcdClearRow(1);
-  lcdClearRow(2);
-  lcdClearRow(3);
-
-  if (alertMask == 0) return;
-
-  String parkingList = "";
-  if (alertMask & 1) parkingList += "P1 ";
-  if (alertMask & 2) parkingList += "P2 ";
-  if (alertMask & 4) parkingList += "P3 ";
-  parkingList.trim();
-
-  lcd.setCursor(0, 1);
-  lcd.print("*** ALERT ***");
-
-  lcd.setCursor(0, 2);
-  lcd.print("PARKING: ");
-  lcd.print(parkingList);
-
-  lcd.setCursor(0, 3);
-  lcd.print("SCAN CORRECT CARD");
+  if (alertMask == 0) {
+    showLCDNormalTitle();
+  } else {
+    showLCDAlert(alertMask);
+  }
 }
 
 // ======================================================
