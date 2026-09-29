@@ -45,14 +45,15 @@ const char* FIREBASE_URL =
 #define BUZZER_PIN 15
 
 // ======================================================
-// LCD 20x4 I2C
-// لا يغيّر أي توصيل حالي
+// LCD 20x4 I2C - OPTIONAL / FAIL-SAFE
 // ======================================================
 #define LCD_SDA 21
 #define LCD_SCL 22
-#define LCD_ADDRESS 0x27
 
-LiquidCrystal_I2C lcd(LCD_ADDRESS, 20, 4);
+LiquidCrystal_I2C lcd27(0x27, 20, 4);
+LiquidCrystal_I2C lcd3F(0x3F, 20, 4);
+LiquidCrystal_I2C* activeLCD = nullptr;
+bool lcdReady = false;
 
 MFRC522 rfid1(SS_P1, RST_PIN);
 MFRC522 rfid2(SS_P2, RST_PIN);
@@ -143,12 +144,9 @@ String pendingEventParking = "";
 SemaphoreHandle_t dataMutex;
 TaskHandle_t firebaseTaskHandle = nullptr;
 
+// LCD only
 unsigned long lastLCDUpdate = 0;
-const unsigned long LCD_UPDATE_INTERVAL = 250;
-String lastLCDLine0 = "";
-String lastLCDLine1 = "";
-String lastLCDLine2 = "";
-String lastLCDLine3 = "";
+const unsigned long LCD_UPDATE_INTERVAL = 500;
 
 // ======================================================
 // HELPERS
@@ -256,25 +254,52 @@ void setEvent(String message, String type, String parking) {
 }
 
 // ======================================================
-// LCD HELPERS
+// LCD - SAFE OPTIONAL DISPLAY
+// إذا الشاشة غير موجودة أو فيها مشكلة، النظام يكمل بدونها
 // ======================================================
-String lcdPad(String text) {
-  if (text.length() > 20) {
-    text = text.substring(0, 20);
-  }
-
-  while (text.length() < 20) {
-    text += " ";
-  }
-
-  return text;
+bool i2cAddressExists(byte address) {
+  Wire.beginTransmission(address);
+  byte error = Wire.endTransmission();
+  return error == 0;
 }
 
-String lcdParkingStatus(
-  ParkingState state,
-  bool occupied,
-  bool booked = false
-) {
+void initLCDSafely() {
+  Serial.println();
+  Serial.println("Checking optional LCD...");
+
+  Wire.begin(LCD_SDA, LCD_SCL);
+  Wire.setTimeOut(50);
+
+  if (i2cAddressExists(0x27)) {
+    activeLCD = &lcd27;
+    Serial.println("LCD found at 0x27");
+  } else if (i2cAddressExists(0x3F)) {
+    activeLCD = &lcd3F;
+    Serial.println("LCD found at 0x3F");
+  } else {
+    lcdReady = false;
+    activeLCD = nullptr;
+    Serial.println("LCD not found - parking system continues normally");
+    return;
+  }
+
+  activeLCD->init();
+  activeLCD->backlight();
+  activeLCD->clear();
+
+  activeLCD->setCursor(0, 0);
+  activeLCD->print("SCHOOL OMAN PARKING");
+  activeLCD->setCursor(0, 1);
+  activeLCD->print("SMART SYSTEM");
+  activeLCD->setCursor(0, 2);
+  activeLCD->print("SYSTEM READY");
+  activeLCD->setCursor(0, 3);
+  activeLCD->print("FIREBASE + RFID");
+
+  lcdReady = true;
+}
+
+String lcdStatus(ParkingState state, bool occupied, bool booked = false) {
   if (state == WRONG_ALERT) return "ALERT";
   if (state == AUTHORIZED_WAIT) return "WAIT";
   if (state == OCCUPIED || occupied) return "PARKED";
@@ -282,22 +307,19 @@ String lcdParkingStatus(
   return "FREE";
 }
 
-void lcdWriteLine(byte row, String text, String &lastText) {
-  String padded = lcdPad(text);
+void lcdPrintLine(byte row, String text) {
+  if (!lcdReady || activeLCD == nullptr) return;
 
-  if (padded == lastText) {
-    return;
-  }
+  if (text.length() > 20) text = text.substring(0, 20);
+  while (text.length() < 20) text += " ";
 
-  lcd.setCursor(0, row);
-  lcd.print(padded);
-  lastText = padded;
+  activeLCD->setCursor(0, row);
+  activeLCD->print(text);
 }
 
 void updateLCD() {
-  if (millis() - lastLCDUpdate < LCD_UPDATE_INTERVAL) {
-    return;
-  }
+  if (!lcdReady || activeLCD == nullptr) return;
+  if (millis() - lastLCDUpdate < LCD_UPDATE_INTERVAL) return;
 
   lastLCDUpdate = millis();
 
@@ -311,49 +333,22 @@ void updateLCD() {
     bookedSnapshot = p3Booked;
   }
 
-  bool anyAlert =
-    p1State == WRONG_ALERT ||
-    p2State == WRONG_ALERT ||
-    p3State == WRONG_ALERT;
-
-  if (anyAlert) {
-    String alertParking = "";
-
+  if (p1State == WRONG_ALERT || p2State == WRONG_ALERT || p3State == WRONG_ALERT) {
+    String alertParking = "P3";
     if (p1State == WRONG_ALERT) alertParking = "P1";
     else if (p2State == WRONG_ALERT) alertParking = "P2";
-    else alertParking = "P3";
 
-    lcdWriteLine(0, "!!! PARKING ALERT !!!", lastLCDLine0);
-    lcdWriteLine(1, alertParking + " UNAUTHORIZED", lastLCDLine1);
-    lcdWriteLine(2, "SCAN CORRECT CARD", lastLCDLine2);
-    lcdWriteLine(
-      3,
-      WiFi.status() == WL_CONNECTED ? "SYSTEM ONLINE" : "SYSTEM OFFLINE",
-      lastLCDLine3
-    );
-
+    lcdPrintLine(0, "!! PARKING ALERT !!");
+    lcdPrintLine(1, alertParking + " UNAUTHORIZED");
+    lcdPrintLine(2, "SCAN CORRECT CARD");
+    lcdPrintLine(3, WiFi.status() == WL_CONNECTED ? "SYSTEM ONLINE" : "SYSTEM OFFLINE");
     return;
   }
 
-  lcdWriteLine(0, "SCHOOL OMAN PARKING", lastLCDLine0);
-
-  lcdWriteLine(
-    1,
-    "P1: " + lcdParkingStatus(p1State, stableIR1),
-    lastLCDLine1
-  );
-
-  lcdWriteLine(
-    2,
-    "P2: " + lcdParkingStatus(p2State, stableIR2),
-    lastLCDLine2
-  );
-
-  lcdWriteLine(
-    3,
-    "P3: " + lcdParkingStatus(p3State, stableIR3, bookedSnapshot),
-    lastLCDLine3
-  );
+  lcdPrintLine(0, "SCHOOL OMAN PARKING");
+  lcdPrintLine(1, "P1: " + lcdStatus(p1State, stableIR1));
+  lcdPrintLine(2, "P2: " + lcdStatus(p2State, stableIR2));
+  lcdPrintLine(3, "P3: " + lcdStatus(p3State, stableIR3, bookedSnapshot));
 }
 
 // ======================================================
@@ -1062,29 +1057,6 @@ void setup() {
 
   digitalWrite(BUZZER_PIN, LOW);
 
-  // ===================================================
-  // LCD
-  // ===================================================
-  Wire.begin(LCD_SDA, LCD_SCL);
-
-  lcd.init();
-  lcd.backlight();
-  lcd.clear();
-
-  lcd.setCursor(0, 0);
-  lcd.print("SCHOOL OMAN PARKING");
-
-  lcd.setCursor(0, 1);
-  lcd.print("SMART SYSTEM");
-
-  lcd.setCursor(0, 2);
-  lcd.print("STARTING...");
-
-  lcd.setCursor(0, 3);
-  lcd.print("PLEASE WAIT");
-
-  delay(700);
-
   SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN);
 
   rfid1.PCD_Init();
@@ -1118,6 +1090,9 @@ void setup() {
   );
 
   Serial.println("Firebase background task started on Core 0");
+
+  // LCD آخر خطوة فقط. إذا لم تعمل، لا تؤثر على النظام الأساسي.
+  initLCDSafely();
 }
 
 // ======================================================
@@ -1132,6 +1107,8 @@ void loop() {
   updateIRFilters();
   updateParkingLogic();
   updateOutputs();
+
+  // شاشة فقط - لا تدخل في منطق المواقف
   updateLCD();
 
   delay(2);
