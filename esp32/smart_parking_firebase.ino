@@ -61,6 +61,9 @@ int lastVoiceAlertMask = 0;
 LiquidCrystal_I2C lcd(LCD_ADDRESS, 16, 2);
 bool lcdReady = false;
 int lastLcdAlertMask = -1;
+bool i2cStarted = false;
+unsigned long lastLcdCheck = 0;
+const unsigned long LCD_RECHECK_INTERVAL = 5000;
 
 MFRC522 rfid1(SS_P1, RST_PIN);
 MFRC522 rfid2(SS_P2, RST_PIN);
@@ -257,17 +260,12 @@ void setEvent(String message, String type, String parking) {
 }
 
 // ======================================================
-// LCD 16x2 - ENGLISH ONLY / BLINK ON ALERT
+// LCD 16x2 - OPTIONAL DEVICE / ALWAYS ON
 // ======================================================
-unsigned long lastLcdBlink = 0;
-const unsigned long LCD_BLINK_INTERVAL = 800;
-bool lcdBacklightOn = true;
-
 void showLCDNormalTitle() {
   if (!lcdReady) return;
 
   lcd.backlight();
-  lcdBacklightOn = true;
   lcd.clear();
 
   lcd.setCursor(2, 0);
@@ -277,25 +275,10 @@ void showLCDNormalTitle() {
   lcd.print("SMART PARKING");
 }
 
-void initLCD() {
-  Wire.begin(LCD_SDA, LCD_SCL);
-
-  lcd.init();
-  lcd.backlight();
-
-  lcdReady = true;
-  lastLcdAlertMask = 0;
-  lastLcdBlink = millis();
-  lcdBacklightOn = true;
-
-  showLCDNormalTitle();
-
-  Serial.println("LCD 16x2 Ready at 0x27");
-}
-
 void showLCDAlert(int alertMask) {
   if (!lcdReady) return;
 
+  lcd.backlight();
   lcd.clear();
 
   String parkingList = "";
@@ -312,6 +295,69 @@ void showLCDAlert(int alertMask) {
   lcd.print("NOT YOUR PARKING");
 }
 
+bool lcdIsConnected() {
+  if (!i2cStarted) return false;
+
+  Wire.beginTransmission(LCD_ADDRESS);
+  byte error = Wire.endTransmission();
+
+  return error == 0;
+}
+
+void initI2CBus() {
+  if (i2cStarted) return;
+
+  Wire.begin(LCD_SDA, LCD_SCL);
+  Wire.setTimeOut(50);
+  i2cStarted = true;
+
+  Serial.println("I2C bus started");
+}
+
+void tryInitLCD() {
+  if (lcdReady) return;
+
+  if (!i2cStarted) {
+    initI2CBus();
+  }
+
+  if (!lcdIsConnected()) {
+    return;
+  }
+
+  lcd.init();
+  lcd.backlight();
+
+  lcdReady = true;
+  lastLcdAlertMask = -1;
+
+  Serial.println("LCD 16x2 detected at 0x27");
+}
+
+void serviceLCDConnection() {
+  if (!i2cStarted) {
+    initI2CBus();
+  }
+
+  if (millis() - lastLcdCheck < LCD_RECHECK_INTERVAL) return;
+  lastLcdCheck = millis();
+
+  bool connected = lcdIsConnected();
+
+  if (!connected) {
+    if (lcdReady) {
+      lcdReady = false;
+      lastLcdAlertMask = -1;
+      Serial.println("LCD disconnected - main system continues");
+    }
+    return;
+  }
+
+  if (!lcdReady) {
+    tryInitLCD();
+  }
+}
+
 void updateLCDAlertOnly() {
   if (!lcdReady) return;
 
@@ -320,30 +366,15 @@ void updateLCDAlertOnly() {
   if (p2State == WRONG_ALERT) alertMask |= 2;
   if (p3State == WRONG_ALERT) alertMask |= 4;
 
-  // Update text only when alert state changes.
-  if (alertMask != lastLcdAlertMask) {
-    lastLcdAlertMask = alertMask;
+  // Update the LCD only when the parking alert state changes.
+  if (alertMask == lastLcdAlertMask) return;
 
-    if (alertMask == 0) {
-      showLCDNormalTitle();
-    } else {
-      showLCDAlert(alertMask);
-      lcd.backlight();
-      lcdBacklightOn = true;
-      lastLcdBlink = millis();
-    }
-  }
+  lastLcdAlertMask = alertMask;
 
-  // Blink backlight only while an alert is active.
-  if (alertMask != 0 && millis() - lastLcdBlink >= LCD_BLINK_INTERVAL) {
-    lastLcdBlink = millis();
-    lcdBacklightOn = !lcdBacklightOn;
-
-    if (lcdBacklightOn) {
-      lcd.backlight();
-    } else {
-      lcd.noBacklight();
-    }
+  if (alertMask == 0) {
+    showLCDNormalTitle();
+  } else {
+    showLCDAlert(alertMask);
   }
 }
 
@@ -1129,8 +1160,10 @@ void setup() {
 
   Serial.println("Firebase background task started on Core 0");
 
-  // LCD is initialized last, after RFID + WiFi + Firebase are already running.
-  initLCD();
+  // LCD is OPTIONAL. Start I2C only after the core system is ready.
+  // If the external LCD power is OFF, the parking system continues normally.
+  initI2CBus();
+  tryInitLCD();
 }
 
 // ======================================================
@@ -1149,6 +1182,9 @@ void loop() {
   // Voice message plays once when a new unauthorized alert begins.
   updateISDVoiceAlert();
 
+  // LCD is independent from the core system.
+  // It can be powered ON/OFF externally without stopping parking operation.
+  serviceLCDConnection();
   updateLCDAlertOnly();
 
   delay(2);
