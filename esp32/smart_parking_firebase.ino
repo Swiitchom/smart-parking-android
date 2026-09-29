@@ -3,8 +3,6 @@
 #include <WiFiClientSecure.h>
 #include <SPI.h>
 #include <MFRC522.h>
-#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
 
 // ======================================================
 // WIFI - غيّر هذين السطرين فقط
@@ -43,17 +41,6 @@ const char* FIREBASE_URL =
 #define RED_P3   4
 
 #define BUZZER_PIN 15
-
-// ======================================================
-// LCD 20x4 I2C - OPTIONAL / FAIL-SAFE
-// ======================================================
-#define LCD_SDA 21
-#define LCD_SCL 22
-
-LiquidCrystal_I2C lcd27(0x27, 20, 4);
-LiquidCrystal_I2C lcd3F(0x3F, 20, 4);
-LiquidCrystal_I2C* activeLCD = nullptr;
-bool lcdReady = false;
 
 MFRC522 rfid1(SS_P1, RST_PIN);
 MFRC522 rfid2(SS_P2, RST_PIN);
@@ -143,10 +130,6 @@ String pendingEventParking = "";
 
 SemaphoreHandle_t dataMutex;
 TaskHandle_t firebaseTaskHandle = nullptr;
-
-// LCD only
-unsigned long lastLCDUpdate = 0;
-const unsigned long LCD_UPDATE_INTERVAL = 500;
 
 // ======================================================
 // HELPERS
@@ -251,104 +234,6 @@ void setEvent(String message, String type, String parking) {
   Serial.println();
   Serial.print("EVENT: ");
   Serial.println(message);
-}
-
-// ======================================================
-// LCD - SAFE OPTIONAL DISPLAY
-// إذا الشاشة غير موجودة أو فيها مشكلة، النظام يكمل بدونها
-// ======================================================
-bool i2cAddressExists(byte address) {
-  Wire.beginTransmission(address);
-  byte error = Wire.endTransmission();
-  return error == 0;
-}
-
-void initLCDSafely() {
-  Serial.println();
-  Serial.println("Checking optional LCD...");
-
-  Wire.begin(LCD_SDA, LCD_SCL);
-  Wire.setTimeOut(50);
-
-  if (i2cAddressExists(0x27)) {
-    activeLCD = &lcd27;
-    Serial.println("LCD found at 0x27");
-  } else if (i2cAddressExists(0x3F)) {
-    activeLCD = &lcd3F;
-    Serial.println("LCD found at 0x3F");
-  } else {
-    lcdReady = false;
-    activeLCD = nullptr;
-    Serial.println("LCD not found - parking system continues normally");
-    return;
-  }
-
-  activeLCD->init();
-  activeLCD->backlight();
-  activeLCD->clear();
-
-  activeLCD->setCursor(0, 0);
-  activeLCD->print("SCHOOL OMAN PARKING");
-  activeLCD->setCursor(0, 1);
-  activeLCD->print("SMART SYSTEM");
-  activeLCD->setCursor(0, 2);
-  activeLCD->print("SYSTEM READY");
-  activeLCD->setCursor(0, 3);
-  activeLCD->print("FIREBASE + RFID");
-
-  lcdReady = true;
-}
-
-String lcdStatus(ParkingState state, bool occupied, bool booked = false) {
-  if (state == WRONG_ALERT) return "ALERT";
-  if (state == AUTHORIZED_WAIT) return "WAIT";
-  if (state == OCCUPIED || occupied) return "PARKED";
-  if (booked) return "BOOKED";
-  return "FREE";
-}
-
-void lcdPrintLine(byte row, String text) {
-  if (!lcdReady || activeLCD == nullptr) return;
-
-  if (text.length() > 20) text = text.substring(0, 20);
-  while (text.length() < 20) text += " ";
-
-  activeLCD->setCursor(0, row);
-  activeLCD->print(text);
-}
-
-void updateLCD() {
-  if (!lcdReady || activeLCD == nullptr) return;
-  if (millis() - lastLCDUpdate < LCD_UPDATE_INTERVAL) return;
-
-  lastLCDUpdate = millis();
-
-  bool bookedSnapshot = false;
-
-  if (dataMutex != nullptr) {
-    xSemaphoreTake(dataMutex, portMAX_DELAY);
-    bookedSnapshot = p3Booked;
-    xSemaphoreGive(dataMutex);
-  } else {
-    bookedSnapshot = p3Booked;
-  }
-
-  if (p1State == WRONG_ALERT || p2State == WRONG_ALERT || p3State == WRONG_ALERT) {
-    String alertParking = "P3";
-    if (p1State == WRONG_ALERT) alertParking = "P1";
-    else if (p2State == WRONG_ALERT) alertParking = "P2";
-
-    lcdPrintLine(0, "!! PARKING ALERT !!");
-    lcdPrintLine(1, alertParking + " UNAUTHORIZED");
-    lcdPrintLine(2, "SCAN CORRECT CARD");
-    lcdPrintLine(3, WiFi.status() == WL_CONNECTED ? "SYSTEM ONLINE" : "SYSTEM OFFLINE");
-    return;
-  }
-
-  lcdPrintLine(0, "SCHOOL OMAN PARKING");
-  lcdPrintLine(1, "P1: " + lcdStatus(p1State, stableIR1));
-  lcdPrintLine(2, "P2: " + lcdStatus(p2State, stableIR2));
-  lcdPrintLine(3, "P3: " + lcdStatus(p3State, stableIR3, bookedSnapshot));
 }
 
 // ======================================================
@@ -1090,9 +975,6 @@ void setup() {
   );
 
   Serial.println("Firebase background task started on Core 0");
-
-  // LCD آخر خطوة فقط. إذا لم تعمل، لا تؤثر على النظام الأساسي.
-  initLCDSafely();
 }
 
 // ======================================================
@@ -1107,9 +989,6 @@ void loop() {
   updateIRFilters();
   updateParkingLogic();
   updateOutputs();
-
-  // شاشة فقط - لا تدخل في منطق المواقف
-  updateLCD();
 
   delay(2);
 }
