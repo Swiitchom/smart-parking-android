@@ -48,7 +48,7 @@ const char* FIREBASE_URL =
 #define LCD_SCL 22
 #define LCD_ADDRESS 0x27
 
-LiquidCrystal_I2C lcd(LCD_ADDRESS, 20, 4);
+LiquidCrystal_I2C lcd(LCD_ADDRESS, 16, 2);
 bool lcdReady = false;
 int lastLcdAlertMask = -1;
 
@@ -247,12 +247,12 @@ void setEvent(String message, String type, String parking) {
 }
 
 // ======================================================
-// LCD 20x4 - NORMAL TITLE / ALERT SCREEN ONLY
+// LCD 16x2 - NORMAL TITLE / ALERT SCREEN ONLY
 // ======================================================
 
 // 8 Arabic custom characters used to approximate:
 // "موقف ليس لك"
-// LCD 20x4 does not have native Arabic, so these are dot-matrix glyphs.
+// LCD 16x2 does not have native Arabic, so these are dot-matrix glyphs.
 byte AR_MEEM[8] = {
   B00000,
   B01110,
@@ -357,17 +357,11 @@ void showLCDNormalTitle() {
 
   lcd.clear();
 
-  lcd.setCursor(0, 0);
-  lcd.print("SCHOOL OMAN PARKING");
+  lcd.setCursor(2, 0);
+  lcd.print("SCHOOL OMAN");
 
-  lcd.setCursor(3, 1);
+  lcd.setCursor(1, 1);
   lcd.print("SMART PARKING");
-
-  lcd.setCursor(4, 2);
-  lcd.print("SYSTEM READY");
-
-  lcd.setCursor(0, 3);
-  lcd.print("                    ");
 }
 
 void printArabicNotYourParking() {
@@ -376,7 +370,7 @@ void printArabicNotYourParking() {
   // Arabic is visually printed right-to-left.
   // Left-to-right LCD sequence is therefore reversed:
   // ك ل   س ي ل   ف ق و م
-  lcd.setCursor(4, 1);
+  lcd.setCursor(3, 1);
   lcd.write(byte(7)); // ك
   lcd.write(byte(4)); // ل
   lcd.print(" ");
@@ -403,7 +397,7 @@ void initLCD() {
 
   showLCDNormalTitle();
 
-  Serial.println("LCD Ready at 0x27");
+  Serial.println("LCD 16x2 Ready at 0x27");
 }
 
 void showLCDAlert(int alertMask) {
@@ -411,24 +405,20 @@ void showLCDAlert(int alertMask) {
 
   lcd.clear();
 
-  // Built-in symbol style so we keep all 8 custom slots for Arabic.
-  lcd.setCursor(0, 0);
-  lcd.print("!!! [X] ALERT !!!");
-
-  printArabicNotYourParking();
-
   String parkingList = "";
   if (alertMask & 1) parkingList += "P1 ";
   if (alertMask & 2) parkingList += "P2 ";
   if (alertMask & 4) parkingList += "P3 ";
   parkingList.trim();
 
-  lcd.setCursor(0, 2);
-  lcd.print("PARKING: ");
+  // 16 characters maximum
+  lcd.setCursor(0, 0);
+  lcd.print("[X] ");
   lcd.print(parkingList);
+  lcd.print(" ALERT");
 
-  lcd.setCursor(0, 3);
-  lcd.print("SCAN CORRECT CARD");
+  // السطر الثاني: "موقف ليس لك" بحروف نقطية مخصصة
+  printArabicNotYourParking();
 }
 
 void updateLCDAlertOnly() {
