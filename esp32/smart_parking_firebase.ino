@@ -48,6 +48,16 @@ const char* FIREBASE_URL =
 #define LCD_SCL 22
 #define LCD_ADDRESS 0x27
 
+// ======================================================
+// ISD1820 VOICE MODULE
+// ======================================================
+#define ISD_PLAYE 2
+const unsigned long ISD_TRIGGER_PULSE_MS = 150;
+
+bool isdTriggerActive = false;
+unsigned long isdTriggerStartedAt = 0;
+int lastVoiceAlertMask = 0;
+
 LiquidCrystal_I2C lcd(LCD_ADDRESS, 16, 2);
 bool lcdReady = false;
 int lastLcdAlertMask = -1;
@@ -334,6 +344,44 @@ void updateLCDAlertOnly() {
     } else {
       lcd.noBacklight();
     }
+  }
+}
+
+// ======================================================
+// ISD1820 - PLAY RECORDED MESSAGE ON NEW ALERT
+// ======================================================
+int getAlertMask() {
+  int alertMask = 0;
+  if (p1State == WRONG_ALERT) alertMask |= 1;
+  if (p2State == WRONG_ALERT) alertMask |= 2;
+  if (p3State == WRONG_ALERT) alertMask |= 4;
+  return alertMask;
+}
+
+void updateISDVoiceAlert() {
+  int alertMask = getAlertMask();
+
+  // Trigger once when a NEW parking alert appears.
+  int newAlerts = alertMask & ~lastVoiceAlertMask;
+  lastVoiceAlertMask = alertMask;
+
+  if (newAlerts != 0 && !isdTriggerActive) {
+    digitalWrite(ISD_PLAYE, HIGH);
+    isdTriggerActive = true;
+    isdTriggerStartedAt = millis();
+
+    Serial.print("ISD1820 Voice Alert: ");
+    if (newAlerts & 1) Serial.print("P1 ");
+    if (newAlerts & 2) Serial.print("P2 ");
+    if (newAlerts & 4) Serial.print("P3 ");
+    Serial.println();
+  }
+
+  // End PLAYE pulse without stopping the main loop.
+  if (isdTriggerActive &&
+      millis() - isdTriggerStartedAt >= ISD_TRIGGER_PULSE_MS) {
+    digitalWrite(ISD_PLAYE, LOW);
+    isdTriggerActive = false;
   }
 }
 
@@ -1041,7 +1089,11 @@ void setup() {
   pinMode(RED_P3, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
 
+  // ISD1820 PLAYE output
+  pinMode(ISD_PLAYE, OUTPUT);
+
   digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(ISD_PLAYE, LOW);
 
   SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN);
 
@@ -1093,6 +1145,9 @@ void loop() {
   updateIRFilters();
   updateParkingLogic();
   updateOutputs();
+
+  // Voice message plays once when a new unauthorized alert begins.
+  updateISDVoiceAlert();
 
   updateLCDAlertOnly();
 
