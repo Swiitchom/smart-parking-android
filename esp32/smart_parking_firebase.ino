@@ -3,6 +3,8 @@
 #include <WiFiClientSecure.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 
 // ======================================================
 // WIFI - غيّر هذين السطرين فقط
@@ -41,6 +43,16 @@ const char* FIREBASE_URL =
 #define RED_P3   4
 
 #define BUZZER_PIN 15
+
+// ======================================================
+// LCD 20x4 I2C
+// لا يغيّر أي توصيل حالي
+// ======================================================
+#define LCD_SDA 21
+#define LCD_SCL 22
+#define LCD_ADDRESS 0x27
+
+LiquidCrystal_I2C lcd(LCD_ADDRESS, 20, 4);
 
 MFRC522 rfid1(SS_P1, RST_PIN);
 MFRC522 rfid2(SS_P2, RST_PIN);
@@ -130,6 +142,13 @@ String pendingEventParking = "";
 
 SemaphoreHandle_t dataMutex;
 TaskHandle_t firebaseTaskHandle = nullptr;
+
+unsigned long lastLCDUpdate = 0;
+const unsigned long LCD_UPDATE_INTERVAL = 250;
+String lastLCDLine0 = "";
+String lastLCDLine1 = "";
+String lastLCDLine2 = "";
+String lastLCDLine3 = "";
 
 // ======================================================
 // HELPERS
@@ -234,6 +253,107 @@ void setEvent(String message, String type, String parking) {
   Serial.println();
   Serial.print("EVENT: ");
   Serial.println(message);
+}
+
+// ======================================================
+// LCD HELPERS
+// ======================================================
+String lcdPad(String text) {
+  if (text.length() > 20) {
+    text = text.substring(0, 20);
+  }
+
+  while (text.length() < 20) {
+    text += " ";
+  }
+
+  return text;
+}
+
+String lcdParkingStatus(
+  ParkingState state,
+  bool occupied,
+  bool booked = false
+) {
+  if (state == WRONG_ALERT) return "ALERT";
+  if (state == AUTHORIZED_WAIT) return "WAIT";
+  if (state == OCCUPIED || occupied) return "PARKED";
+  if (booked) return "BOOKED";
+  return "FREE";
+}
+
+void lcdWriteLine(byte row, String text, String &lastText) {
+  String padded = lcdPad(text);
+
+  if (padded == lastText) {
+    return;
+  }
+
+  lcd.setCursor(0, row);
+  lcd.print(padded);
+  lastText = padded;
+}
+
+void updateLCD() {
+  if (millis() - lastLCDUpdate < LCD_UPDATE_INTERVAL) {
+    return;
+  }
+
+  lastLCDUpdate = millis();
+
+  bool bookedSnapshot = false;
+
+  if (dataMutex != nullptr) {
+    xSemaphoreTake(dataMutex, portMAX_DELAY);
+    bookedSnapshot = p3Booked;
+    xSemaphoreGive(dataMutex);
+  } else {
+    bookedSnapshot = p3Booked;
+  }
+
+  bool anyAlert =
+    p1State == WRONG_ALERT ||
+    p2State == WRONG_ALERT ||
+    p3State == WRONG_ALERT;
+
+  if (anyAlert) {
+    String alertParking = "";
+
+    if (p1State == WRONG_ALERT) alertParking = "P1";
+    else if (p2State == WRONG_ALERT) alertParking = "P2";
+    else alertParking = "P3";
+
+    lcdWriteLine(0, "!!! PARKING ALERT !!!", lastLCDLine0);
+    lcdWriteLine(1, alertParking + " UNAUTHORIZED", lastLCDLine1);
+    lcdWriteLine(2, "SCAN CORRECT CARD", lastLCDLine2);
+    lcdWriteLine(
+      3,
+      WiFi.status() == WL_CONNECTED ? "SYSTEM ONLINE" : "SYSTEM OFFLINE",
+      lastLCDLine3
+    );
+
+    return;
+  }
+
+  lcdWriteLine(0, "SCHOOL OMAN PARKING", lastLCDLine0);
+
+  lcdWriteLine(
+    1,
+    "P1: " + lcdParkingStatus(p1State, stableIR1),
+    lastLCDLine1
+  );
+
+  lcdWriteLine(
+    2,
+    "P2: " + lcdParkingStatus(p2State, stableIR2),
+    lastLCDLine2
+  );
+
+  lcdWriteLine(
+    3,
+    "P3: " + lcdParkingStatus(p3State, stableIR3, bookedSnapshot),
+    lastLCDLine3
+  );
 }
 
 // ======================================================
@@ -942,6 +1062,29 @@ void setup() {
 
   digitalWrite(BUZZER_PIN, LOW);
 
+  // ===================================================
+  // LCD
+  // ===================================================
+  Wire.begin(LCD_SDA, LCD_SCL);
+
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("SCHOOL OMAN PARKING");
+
+  lcd.setCursor(0, 1);
+  lcd.print("SMART SYSTEM");
+
+  lcd.setCursor(0, 2);
+  lcd.print("STARTING...");
+
+  lcd.setCursor(0, 3);
+  lcd.print("PLEASE WAIT");
+
+  delay(700);
+
   SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN);
 
   rfid1.PCD_Init();
@@ -989,6 +1132,7 @@ void loop() {
   updateIRFilters();
   updateParkingLogic();
   updateOutputs();
+  updateLCD();
 
   delay(2);
 }
