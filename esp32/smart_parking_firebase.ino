@@ -3,6 +3,8 @@
 #include <WiFiClientSecure.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 
 // ======================================================
 // WIFI - غيّر هذين السطرين فقط
@@ -42,6 +44,14 @@ const char* FIREBASE_URL =
 
 #define BUZZER_PIN 15
 
+#define LCD_SDA 21
+#define LCD_SCL 22
+#define LCD_ADDRESS 0x27
+
+LiquidCrystal_I2C lcd(LCD_ADDRESS, 20, 4);
+bool lcdReady = false;
+int lastLcdAlertMask = -1;
+
 MFRC522 rfid1(SS_P1, RST_PIN);
 MFRC522 rfid2(SS_P2, RST_PIN);
 MFRC522 rfid3(SS_P3, RST_PIN);
@@ -49,7 +59,7 @@ MFRC522 rfid3(SS_P3, RST_PIN);
 // ======================================================
 // UIDs
 // ======================================================
-String BUS1_UID = "2E A9 4F 06";
+String BUS1_UID = "13 D0 38 6F";
 String BUS2_UID = "B3 E5 92 56";
 
 // ======================================================
@@ -234,6 +244,74 @@ void setEvent(String message, String type, String parking) {
   Serial.println();
   Serial.print("EVENT: ");
   Serial.println(message);
+}
+
+// ======================================================
+// LCD 20x4 - TITLE FIXED / ALERT ONLY
+// ======================================================
+void lcdClearRow(byte row) {
+  if (!lcdReady) return;
+  lcd.setCursor(0, row);
+  lcd.print("                    ");
+}
+
+void initLCD() {
+  Wire.begin(LCD_SDA, LCD_SCL);
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("SCHOOL OMAN PARKING");
+
+  lcdClearRow(1);
+  lcdClearRow(2);
+  lcdClearRow(3);
+
+  lcdReady = true;
+  lastLcdAlertMask = 0;
+
+  Serial.println("LCD Ready at 0x27");
+}
+
+void updateLCDAlertOnly() {
+  if (!lcdReady) return;
+
+  int alertMask = 0;
+  if (p1State == WRONG_ALERT) alertMask |= 1;
+  if (p2State == WRONG_ALERT) alertMask |= 2;
+  if (p3State == WRONG_ALERT) alertMask |= 4;
+
+  // لا نرسل أي أوامر I2C إذا لم تتغير حالة التنبيه
+  if (alertMask == lastLcdAlertMask) return;
+
+  lastLcdAlertMask = alertMask;
+
+  // العنوان الرئيسي يبقى ثابت دائماً
+  lcd.setCursor(0, 0);
+  lcd.print("SCHOOL OMAN PARKING");
+
+  lcdClearRow(1);
+  lcdClearRow(2);
+  lcdClearRow(3);
+
+  if (alertMask == 0) return;
+
+  String parkingList = "";
+  if (alertMask & 1) parkingList += "P1 ";
+  if (alertMask & 2) parkingList += "P2 ";
+  if (alertMask & 4) parkingList += "P3 ";
+  parkingList.trim();
+
+  lcd.setCursor(0, 1);
+  lcd.print("*** ALERT ***");
+
+  lcd.setCursor(0, 2);
+  lcd.print("PARKING: ");
+  lcd.print(parkingList);
+
+  lcd.setCursor(0, 3);
+  lcd.print("SCAN CORRECT CARD");
 }
 
 // ======================================================
@@ -975,6 +1053,9 @@ void setup() {
   );
 
   Serial.println("Firebase background task started on Core 0");
+
+  // LCD is initialized last, after RFID + WiFi + Firebase are already running.
+  initLCD();
 }
 
 // ======================================================
@@ -989,6 +1070,8 @@ void loop() {
   updateIRFilters();
   updateParkingLogic();
   updateOutputs();
+
+  updateLCDAlertOnly();
 
   delay(2);
 }
